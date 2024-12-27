@@ -1,49 +1,35 @@
-import gradio as gr
-from transformers import pipeline
-import os
+import streamlit as st
+from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 
-# Initialize pipelines with specified models
-image_caption_pipe = pipeline("image-to-text", model="nlpconnect/vit-gpt2-image-captioning")
-text_generation_pipe = pipeline("text-generation", model="tiiuae/Falcon3-1B-Instruct")
+# Load the fine-tuned model
+def load_model(model_path):
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    model = AutoModelForCausalLM.from_pretrained(model_path)
+    return pipeline("text-generation", model=model, tokenizer=tokenizer, device=-1)
 
-# Define the inbuilt custom prompt
-inbuilt_custom_prompt = "can you explain what this sentence says and make it brief :"
+finetuned_model_path = "local_models/finetuned_agent"
+finetuned_pipe = load_model(finetuned_model_path)
 
-def multi_agent_inference(image):
-    # Generate caption from image
-    caption = image_caption_pipe(image)[0]['generated_text']
-    yield (caption, "Processing text model...")  # Stream the caption first and show processing status
+# Function to generate responses
+def generate_response(pipe, prompt):
+    response = pipe(prompt, max_length=100, num_return_sequences=1, truncation=True)[0]["generated_text"]
+    return response
 
-    # Concatenate inbuilt custom prompt with caption
-    input_text = f"{caption} {inbuilt_custom_prompt}"
+# Initialize session state for conversation history
+if "finetuned_history" not in st.session_state:
+    st.session_state.finetuned_history = []
 
-    # Generate enhanced description from caption
-    enhanced_description = text_generation_pipe(input_text, max_length=100, num_return_sequences=1)[0]['generated_text']
-    
-    # Remove the inbuilt custom prompt from the enhanced description
-    enhanced_description = enhanced_description.replace(inbuilt_custom_prompt, "").strip()
-    
-    yield (caption, enhanced_description)
+# Streamlit page layout
+st.title("Fine-Tuned Model Chat")
 
-def end_program():
-    print("Ending the program...")
-    os._exit(0)
+st.header("Fine-Tuned Model")
+finetuned_prompt = st.text_input("Enter prompt for fine-tuned model:", key="finetuned")
+if st.button("Send", key="send_finetuned"):
+    if finetuned_prompt:
+        finetuned_response = generate_response(finetuned_pipe, finetuned_prompt)
+        st.session_state.finetuned_history.append((finetuned_prompt, finetuned_response))
 
-if __name__ == '__main__':
-    with gr.Blocks(css="custom.css") as iface:
-        gr.Markdown("<h1 style='text-align: center;'>Hybrid Model Combination of Language and Feature Extractor</h1>")
-        gr.Markdown("<p style='text-align: center;'>Upload an image, and the model will generate a description and enhance it with more details.</p>")
-        
-        with gr.Row():
-            with gr.Column():
-                input_image = gr.Image(type="pil", label="Upload Image", interactive=True)
-                generate_btn = gr.Button("Generate")
-                end_btn = gr.Button("End Program")
-            with gr.Column():
-                caption_out = gr.Textbox(label="Image Model Output (vit-gpt2-image-captioning)", lines=5)
-                text_out = gr.Textbox(label="Text Model Output (Falcon3-1B-Instruct)", lines=5)
-        
-        generate_btn.click(fn=multi_agent_inference, inputs=input_image, outputs=[caption_out, text_out])
-        end_btn.click(fn=end_program, inputs=None, outputs=None)
-
-    iface.launch(share=True, show_api=False)
+# Display conversation history
+for user_msg, bot_msg in st.session_state.finetuned_history:
+    st.write(f"**User:** {user_msg}")
+    st.write(f"**Agent:** {bot_msg}")
